@@ -27,8 +27,120 @@ def get_board_db(slug):
         return board_db
     return None
 
-def row_to_dict(row):
-    return dict(row) if row else None
+# ── HTML Template ──────────────────────────────────────────────────────────
+
+PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kanban Board</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 0.75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 1.1rem; color: #22d3ee; }
+  .header .btn { padding: 0.4rem 1rem; background: #22d3ee; color: #0f172a; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+  .header .btn:hover { opacity: 0.85; }
+  .board { display: flex; gap: 1rem; padding: 1rem; overflow-x: auto; height: calc(100vh - 52px); align-items: flex-start; }
+  .column { background: #1e293b; border-radius: 8px; min-width: 220px; max-width: 280px; flex: 1; display: flex; flex-direction: column; max-height: 100%; }
+  .column-header { padding: 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; }
+  .column-header .count { background: #334155; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.65rem; }
+  .column-body { padding: 0.5rem; overflow-y: auto; flex: 1; min-height: 60px; }
+  .task-card { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem; margin-bottom: 0.5rem; cursor: grab; transition: border-color 0.15s, box-shadow 0.15s; }
+  .task-card:hover { border-color: #22d3ee; box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2); }
+  .task-card.dragging { opacity: 0.5; cursor: grabbing; }
+  .task-card .title { font-size: 0.85rem; font-weight: 500; margin-bottom: 0.25rem; }
+  .task-card .meta { font-size: 0.65rem; color: #64748b; display: flex; justify-content: space-between; }
+  .task-card .assignee { background: #1e3a5f; color: #22d3ee; padding: 0.1rem 0.4rem; border-radius: 4px; }
+  .column-body.drag-over { background: rgba(34, 211, 238, 0.05); border: 1px dashed #22d3ee; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⚡ Kanban Board</h1>
+  <button class="btn" onclick="showCreateForm()">+ New Task</button>
+</div>
+<div class="board" id="board"><div style="color:#475569;padding:2rem;">Loading...</div></div>
+<script>
+const STATUSES = [
+  { key: 'triage', label: 'Triage', color: '#94a3b8' },
+  { key: 'todo', label: 'Todo', color: '#64748b' },
+  { key: 'ready', label: 'Ready', color: '#22d3ee' },
+  { key: 'running', label: 'Running', color: '#fbbf24' },
+  { key: 'blocked', label: 'Blocked', color: '#fb7185' },
+  { key: 'done', label: 'Done', color: '#34d399' },
+];
+let tasks = [];
+let draggedCard = null;
+
+async function loadTasks() {
+  const res = await fetch('/api/boards/default/tasks');
+  tasks = await res.json();
+  renderBoard();
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = STATUSES.map(status => {
+    const statusTasks = tasks.filter(t => t.status === status.key);
+    return '<div class="column" data-status="' + status.key + '">' +
+      '<div class="column-header" style="border-left:3px solid ' + status.color + ';padding-left:0.6rem;">' +
+        '<span>' + status.label + '</span>' +
+        '<span class="count">' + statusTasks.length + '</span>' +
+      '</div>' +
+      '<div class="column-body" data-status="' + status.key + '">' +
+        statusTasks.map(task => renderCard(task)).join('') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderCard(task) {
+  return '<div class="task-card" draggable="true" data-id="' + esc(task.id) + '" onclick="openTask(\'' + esc(task.id) + '\')">' +
+    '<div class="title">' + esc(task.title) + '</div>' +
+    '<div class="meta">' +
+      '<span class="assignee">' + esc(task.assignee || 'unassigned') + '</span>' +
+      '<span>' + fmtDate(task.created_at) + '</span>' +
+    '</div>' +
+  '</div>';
+}
+
+function esc(s) { var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function fmtDate(s) { if(!s) return ''; var d=new Date(s); return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+
+document.addEventListener('dragstart', function(e) {
+  if(e.target.classList.contains('task-card')) { draggedCard=e.target; e.target.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
+});
+document.addEventListener('dragend', function(e) {
+  if(e.target.classList.contains('task-card')) { e.target.classList.remove('dragging'); draggedCard=null; }
+});
+document.addEventListener('dragover', function(e) {
+  var cb=e.target.closest('.column-body');
+  if(cb) { e.preventDefault(); e.dataTransfer.dropEffect='move'; cb.classList.add('drag-over'); }
+});
+document.addEventListener('dragleave', function(e) {
+  var cb=e.target.closest('.column-body');
+  if(cb && !cb.contains(e.relatedTarget)) cb.classList.remove('drag-over');
+});
+document.addEventListener('drop', async function(e) {
+  e.preventDefault();
+  var cb=e.target.closest('.column-body');
+  if(!cb||!draggedCard) return;
+  cb.classList.remove('drag-over');
+  var newStatus=cb.dataset.status;
+  var taskId=draggedCard.dataset.id;
+  var res=await fetch('/api/tasks/'+taskId, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
+  if(res.ok) { var t=tasks.find(function(x){return x.id===taskId;}); if(t) t.status=newStatus; renderBoard(); }
+});
+
+function openTask(id) { console.log('open',id); }
+function showCreateForm() { alert('Coming soon!'); }
+
+loadTasks();
+</script>
+</body>
+</html>"""
 
 # ── Request Handler ─────────────────────────────────────────────────────────
 
@@ -43,9 +155,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"<h1>Hello Kanban</h1>")
+            self.wfile.write(PAGE_HTML.encode())
 
-        # GET /api/boards — list boards
         elif path == "/api/boards":
             boards = [{"slug": "default", "name": "Default", "description": "", "icon": "📋"}]
             boards_dir = KANBAN_DB.parent / "kanban" / "boards"
@@ -60,7 +171,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         })
             self.json_response(boards)
 
-        # GET /api/boards/{slug}/tasks — list tasks
         elif path.startswith("/api/boards/") and path.endswith("/tasks"):
             slug = path.split("/")[3]
             board_db = get_board_db(slug)
@@ -85,7 +195,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             self.json_response([dict(r) for r in rows])
 
-        # GET /api/tasks/{id} — task detail
         elif path.startswith("/api/tasks/") and "/comments" not in path and "/links" not in path:
             task_id = path.split("/")[3]
             conn = get_db()
@@ -104,7 +213,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             self.json_response(task)
 
-        # GET /api/tasks/{id}/comments
         elif path.startswith("/api/tasks/") and path.endswith("/comments"):
             task_id = path.split("/")[3]
             conn = get_db()
@@ -113,7 +221,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             self.json_response([dict(r) for r in rows])
 
-        # GET /api/profiles
         elif path == "/api/profiles":
             profiles_dir = KANBAN_DB.parent / "profiles"
             profiles = [{"name": "default", "path": str(KANBAN_DB.parent)}]
@@ -133,7 +240,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
 
-        # POST /api/boards/{slug}/tasks — create task
         if path.startswith("/api/boards/") and path.endswith("/tasks"):
             slug = path.split("/")[3]
             board_db = get_board_db(slug)
@@ -159,7 +265,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             self.json_response(dict(row), 201)
 
-        # POST /api/tasks/{id}/comments
         elif path.startswith("/api/tasks/") and path.endswith("/comments"):
             task_id = path.split("/")[3]
             comment_body = body.get("body", "").strip()
