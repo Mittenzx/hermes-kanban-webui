@@ -123,14 +123,37 @@
   .toast.success { background: rgba(0,40,20,0.9); color: var(--accent-green); border-color: var(--accent-green); box-shadow: var(--glow-green); }
   .toast.error { background: rgba(40,0,20,0.9); color: var(--accent-pink); border-color: var(--accent-pink); box-shadow: var(--glow-pink); }
 
-  /* ── Scrollbar ── */
-  ::-webkit-scrollbar { width: 5px; }
+/* ── Nav Bar ── */
+  .nav { background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 0 1.5rem; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1; height: 44px; }
+  .nav-brand { font-size: 0.85rem; color: var(--accent-cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; text-shadow: var(--glow-cyan); }
+  .nav-brand::before { content: '▸ '; color: var(--accent-green); text-shadow: var(--glow-green); }
+  .nav-menu { display: flex; gap: 0; height: 100%; }
+  .nav-item { padding: 0 1rem; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; display: flex; align-items: center; border-bottom: 2px solid transparent; transition: all 0.15s; height: 100%; }
+  .nav-item:hover { color: var(--text-primary); }
+  .nav-item.active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); text-shadow: var(--glow-cyan); }
+  .nav-actions { display: flex; gap: 0.4rem; align-items: center; }
+
+  /* ── Page container ── */
+  .page { display: none; height: calc(100vh - 44px); }
+  .page.active { display: block; }
   ::-webkit-scrollbar-track { background: var(--bg-primary); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
 </style>
 </head>
 <body>
+<div class="nav">
+  <div class="nav-brand">Hermes</div>
+  <div class="nav-menu">
+    <div class="nav-item active" data-page="kanban" onclick="switchPage('kanban')">Kanban</div>
+    <div class="nav-item" data-page="profiles" onclick="switchPage('profiles')">Profiles</div>
+  </div>
+  <div class="nav-actions">
+    <span style="font-size:0.55rem;color:var(--text-muted);" id="task-count">0 tasks</span>
+  </div>
+</div>
+
+<div class="page active" id="page-kanban">
 <div class="header">
   <div style="display:flex;gap:0.6rem;align-items:center;">
     <h1>Kanban</h1>
@@ -138,7 +161,6 @@
     <button class="btn" onclick="showCreateBoard()" style="padding:0.25rem 0.5rem;font-size:0.6rem;">+ Board</button>
   </div>
   <div style="display:flex;gap:0.4rem;align-items:center;">
-    <span style="font-size:0.55rem;color:var(--text-muted);" id="task-count">0 tasks</span>
     <button class="btn" onclick="showCreateForm()">+ New Task</button>
   </div>
 </div>
@@ -184,7 +206,9 @@
       <button class="btn btn-secondary" onclick="hideCreateForm()">Cancel</button>
     </div>
   </div>
-</div>
+</div><!-- end modal -->
+
+</div><!-- end page-kanban -->
 
 <!-- Toast -->
 <div id="toast" class="toast" style="display:none;"></div>
@@ -428,11 +452,46 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){closeDrawer();hideCreateForm();document.getElementById('modal-overlay').classList.remove('active');}
 });
 
+/* ── Navigation ── */
+function switchPage(page) {
+  var items = document.querySelectorAll('.nav-item');
+  for(var i=0;i<items.length;i++){
+    items[i].classList.toggle('active', items[i].dataset.page===page);
+  }
+  var pages = document.querySelectorAll('.page');
+  for(var i=0;i<pages.length;i++){
+    pages[i].classList.toggle('active', pages[i].id==='page-'+page);
+  }
+  if(page==='profiles') renderProfiles();
+}
+
+/* ── Profiles ── */
+function renderProfiles() {
+  var container = document.getElementById('profiles-list');
+  if(!container) return;
+  container.innerHTML = '';
+  for(var i=0;i<profiles.length;i++){
+    var p = profiles[i];
+    container.innerHTML += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:3px;padding:0.75rem;display:flex;justify-content:space-between;align-items:center;">'+
+      '<div><div style="font-size:0.8rem;color:var(--text-primary);font-weight:600;">'+esc(p.name)+'</div><div style="font-size:0.6rem;color:var(--text-muted);margin-top:0.15rem;">'+esc(p.path)+'</div></div>'+
+      '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;">View Files</button>'+
+      '</div>';
+  }
+}
+
 /* ── Init ── */
 loadProfiles();
 loadBoards();
 loadTasks();
 setInterval(loadTasks,10000);
 </script>
+
+<div class="page" id="page-profiles">
+<div style="padding:1.5rem;max-width:900px;margin:0 auto;">
+  <h2 style="font-size:0.9rem;color:var(--accent-cyan);font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem;text-shadow:var(--glow-cyan);">Profiles</h2>
+  <div id="profiles-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
+</div>
+</div>
+
 </body>
 </html>
