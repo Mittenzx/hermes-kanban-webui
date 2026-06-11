@@ -108,7 +108,11 @@
 </head>
 <body>
 <div class="header">
-  <h1>Kanban Board</h1>
+  <div style="display:flex;gap:0.75rem;align-items:center;">
+    <h1>Kanban</h1>
+    <select id="board-switcher" onchange="switchBoard(this.value)" style="background:#020617;border:1px solid #1e293b;border-radius:3px;color:#94a3b8;padding:0.3rem 0.5rem;font-size:0.7rem;font-family:inherit;"></select>
+    <button class="btn" onclick="showCreateBoard()" style="padding:0.3rem 0.6rem;font-size:0.65rem;">+ Board</button>
+  </div>
   <div style="display:flex;gap:0.5rem;align-items:center;">
     <span style="font-size:0.6rem;color:#334155;" id="task-count">0 tasks</span>
     <button class="btn" onclick="showCreateForm()">+ New Task</button>
@@ -176,7 +180,7 @@ var draggedCard = null;
 var currentTaskId = null;
 
 function loadTasks() {
-  fetch('/api/boards/default/tasks').then(function(r){return r.json();}).then(function(data){
+  fetch('/api/boards/'+currentBoard+'/tasks').then(function(r){return r.json();}).then(function(data){
     tasks = data;
     document.getElementById('task-count').textContent = tasks.length + ' tasks';
     renderBoard();
@@ -344,7 +348,7 @@ function hideCreateForm() {
 function submitTask() {
   var title = document.getElementById('new-title').value.trim();
   if(!title) return;
-  fetch('/api/boards/default/tasks',{
+  fetch('/api/boards/'+currentBoard+'/tasks',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       title:title,
@@ -373,8 +377,41 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){closeDrawer();hideCreateForm();document.getElementById('modal-overlay').classList.remove('active');}
 });
 
+/* ── Board Management ── */
+var currentBoard = 'default';
+var boards = [];
+
+function loadBoards() {
+  fetch('/api/boards').then(function(r){return r.json();}).then(function(data){
+    boards = data;
+    var sel = document.getElementById('board-switcher');
+    sel.innerHTML = '';
+    for(var i=0;i<boards.length;i++){
+      sel.innerHTML += '<option value="'+esc(boards[i].slug)+'" '+(boards[i].slug===currentBoard?'selected':'')+'>'+esc(boards[i].name)+'</option>';
+    }
+  });
+}
+
+function switchBoard(slug) {
+  currentBoard = slug;
+  loadTasks();
+}
+
+function showCreateBoard() {
+  var slug = prompt('Board slug (lowercase, hyphens ok):');
+  if(!slug) return;
+  slug = slug.trim().toLowerCase();
+  fetch('/api/boards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug})})
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { alert(data.error); return; }
+      loadBoards();
+      switchBoard(slug);
+    });
+}
+
 /* ── Init ── */
 loadProfiles();
+loadBoards();
 loadTasks();
 setInterval(loadTasks,10000);
 </script>

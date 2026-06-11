@@ -131,7 +131,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
 
-        if path.startswith("/api/boards/") and path.endswith("/tasks"):
+        # POST /api/boards — create a new board
+        if path == "/api/boards":
+            slug = body.get("slug", "").strip().lower()
+            if not slug:
+                self.json_response({"error": "Slug required"}, 400)
+                return
+            import re as _re
+            if not _re.match(r'^[a-z0-9][a-z0-9_-]{0,63}$', slug):
+                self.json_response({"error": "Invalid slug: lowercase alphanumerics, hyphens, underscores"}, 400)
+                return
+            if slug == "default":
+                self.json_response({"error": "Cannot create board named 'default'"}, 400)
+                return
+            board_dir = KANBAN_DB.parent / "kanban" / "boards" / slug
+            if board_dir.exists():
+                self.json_response({"error": "Board already exists"}, 409)
+                return
+            board_dir.mkdir(parents=True)
+            board_db = board_dir / "kanban.db"
+            import shutil
+            shutil.copy2(str(KANBAN_DB), str(board_db))
+            self.json_response({"slug": slug, "name": slug.replace("-", " ").replace("_", " ").title()}, 201)
+
+        elif path.startswith("/api/boards/") and path.endswith("/tasks"):
             slug = path.split("/")[3]
             board_db = get_board_db(slug)
             if not board_db:
@@ -175,6 +198,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             self.json_response(dict(row), 201)
 
+        # POST /api/tasks/{id}/links — add parent link
+        elif path.startswith("/api/tasks/") and path.endswith("/links"):
+            task_id = path.split("/")[3]
+            parent_id = body.get("parent_id")
+            if not parent_id:
+                self.json_response({"error": "parent_id required"}, 400)
+                return
+            conn = get_db()
+            conn.execute("INSERT OR IGNORE INTO task_links (parent_id, child_id) VALUES (?, ?)", (parent_id, task_id))
+            conn.commit()
+            conn.close()
+            self.json_response({"ok": True})
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -217,7 +253,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
-        if path.startswith("/api/tasks/"):
+        # DELETE /api/tasks/{id}/links/{parent_id} — remove link
+        if path.startswith("/api/tasks/") and "/links/" in path:
+            parts = path.split("/")
+            task_id = parts[3]
+            parent_id = parts[5]
+            conn = get_db()
+            conn.execute("DELETE FROM task_links WHERE parent_id = ? AND child_id = ?", (parent_id, task_id))
+            conn.commit()
+            conn.close()
+            self.json_response({"ok": True})
+
+        elif path.startswith("/api/tasks/"):
             task_id = path.split("/")[3]
             conn = get_db()
             conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
