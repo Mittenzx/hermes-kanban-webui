@@ -519,6 +519,115 @@ function deleteProfile(name) {
     });
 }
 
+/* ── File Browser ── */
+var currentFileProfile = '';
+var currentFilePath = '';
+
+function showFiles(name) {
+  currentFileProfile = name;
+  var container = document.getElementById('profiles-list');
+  container.innerHTML = '';
+  // Header with back button
+  container.innerHTML += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
+    '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="renderProfiles()">← Back</button>'+
+    '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">📁 ' + esc(name) + '/</span>'+
+    '</div>';
+  // Loading
+  container.innerHTML += '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;">Loading...</div>';
+  fetch('/api/profiles/' + name + '/files')
+    .then(function(r){return r.json();}).then(function(files){
+      container.innerHTML = '';
+      // Header
+      container.innerHTML += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
+        '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="renderProfiles()">← Back</button>'+
+        '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">📁 ' + esc(name) + '/</span>'+
+        '<span style="font-size:0.55rem;color:var(--text-muted);">(' + files.length + ' items)</span>'+
+        '</div>';
+      if(files.length === 0) {
+        container.innerHTML += '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;text-align:center;">Empty directory</div>';
+        return;
+      }
+      for(var i=0;i<files.length;i++){
+        var f = files[i];
+        var icon = f.is_dir ? '📁' : '📄';
+        var name = f.path.split('/').pop();
+        var sizeText = f.is_dir ? '' : formatSize(f.size);
+        var actions = '';
+        if(!f.is_dir) {
+          if(name === 'SOUL.md') {
+            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\')">Edit</button>';
+          } else {
+            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="viewFile(\''+esc(name)+'\')">View</button>';
+          }
+        }
+        container.innerHTML += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);font-size:0.65rem;">'+
+          '<span style="flex-shrink:0;">'+icon+'</span>'+
+          '<span style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(f.path)+'</span>'+
+          '<span style="color:var(--text-muted);flex-shrink:0;font-size:0.55rem;">'+sizeText+'</span>'+
+          '<div style="flex-shrink:0;display:flex;gap:0.2rem;">'+actions+'</div>'+
+          '</div>';
+      }
+    });
+}
+
+function formatSize(bytes) {
+  if(bytes < 1024) return bytes + ' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+
+/* ── SOUL.md Editor ── */
+function editSoul(name) {
+  currentFileProfile = name;
+  currentFilePath = 'SOUL.md';
+  var container = document.getElementById('profiles-list');
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;">Loading...</div>';
+  fetch('/api/profiles/' + name + '/file?path=SOUL.md')
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Error: ' + esc(data.error) + '</div>'; return; }
+      container.innerHTML =
+        '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
+          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="showFiles(\''+esc(name)+'\')">← Back</button>'+
+          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">✏️ Editing SOUL.md</span>'+
+          '<span style="font-size:0.55rem;color:var(--text-muted);">('+esc(name)+')</span>'+
+        '</div>'+
+        '<textarea id="soul-editor" style="width:100%;height:calc(100vh - 200px);min-height:300px;background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:0.7rem;font-family:inherit;padding:0.75rem;resize:vertical;outline:none;" onfocus="this.style.borderColor=\'var(--accent-cyan)\';this.style.boxShadow=\'0 0 6px rgba(0,212,255,0.2)\'" onblur="this.style.borderColor=\'var(--border)\';this.style.boxShadow=\'none\'">'+esc(data.content)+'</textarea>'+
+        '<div style="display:flex;gap:0.4rem;margin-top:0.5rem;">'+
+          '<button class="btn btn-success" onclick="saveSoul()">Save</button>'+
+          '<button class="btn btn-secondary" onclick="showFiles(\''+esc(name)+'\')">Cancel</button>'+
+        '</div>';
+    });
+}
+
+function saveSoul() {
+  var content = document.getElementById('soul-editor').value;
+  fetch('/api/profiles/' + currentFileProfile + '/file?path=' + currentFilePath, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain'},
+    body: content
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data.error) { alert(data.error); return; }
+    showToast('SOUL.md saved', 'success');
+    showFiles(currentFileProfile);
+  });
+}
+
+function viewFile(name) {
+  var container = document.getElementById('profiles-list');
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;">Loading...</div>';
+  fetch('/api/profiles/' + currentFileProfile + '/file?path=' + encodeURIComponent(name))
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Error: ' + esc(data.error) + '</div>'; return; }
+      container.innerHTML =
+        '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
+          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="showFiles(\''+esc(currentFileProfile)+'\')">← Back</button>'+
+          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">📄 '+esc(name)+'</span>'+
+          '<span style="font-size:0.55rem;color:var(--text-muted);">('+esc(currentFileProfile)+')</span>'+
+        '</div>'+
+        '<pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;padding:0.75rem;font-size:0.65rem;color:var(--text-secondary);white-space:pre-wrap;word-wrap:break-word;max-height:calc(100vh - 200px);overflow-y:auto;font-family:inherit;">'+(data.content ? esc(data.content) : '(empty file)')+'</pre>';
+    });
+}
+
 /* ── Create Profile ── */
 var allPersonalities = [];
 
