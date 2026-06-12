@@ -114,12 +114,94 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/profiles":
             profiles_dir = KANBAN_DB.parent / "profiles"
-            profiles = [{"name": "default", "path": str(KANBAN_DB.parent)}]
+            result = []
+            # Default profile
+            default_path = KANBAN_DB.parent
+            soul_path = default_path / "SOUL.md"
+            personality = ""
+            if soul_path.exists():
+                try:
+                    personality = soul_path.read_text(encoding="utf-8", errors="replace")[:200]
+                except: pass
+            skills_count = 0
+            skills_dir = default_path / "skills"
+            if skills_dir.exists():
+                skills_count = sum(1 for _ in skills_dir.rglob("SKILL.md"))
+            config_path = default_path / "config.yaml"
+            model = ""
+            if config_path.exists():
+                try:
+                    for line in config_path.read_text(encoding="utf-8", errors="replace").split("\n"):
+                        if line.strip().startswith("default:"):
+                            model = line.split(":", 1)[1].strip().strip('"').strip("'")
+                            break
+                except: pass
+            result.append({"name": "default", "path": str(default_path), "is_default": True, "personality": personality, "skills_count": skills_count, "model": model})
+            # Named profiles
             if profiles_dir.exists():
                 for d in sorted(profiles_dir.iterdir()):
                     if d.is_dir():
-                        profiles.append({"name": d.name, "path": str(d)})
-            self.json_response(profiles)
+                        p_soul = d / "SOUL.md"
+                        p_personality = ""
+                        if p_soul.exists():
+                            try:
+                                p_personality = p_soul.read_text(encoding="utf-8", errors="replace")[:200]
+                            except: pass
+                        p_skills = 0
+                        p_skills_dir = d / "skills"
+                        if p_skills_dir.exists():
+                            p_skills = sum(1 for _ in p_skills_dir.rglob("SKILL.md"))
+                        result.append({"name": d.name, "path": str(d), "is_default": False, "personality": p_personality, "skills_count": p_skills, "model": ""})
+            self.json_response(result)
+
+        # GET /api/profiles/{name}/files — list files in profile directory
+        elif path.startswith("/api/profiles/") and path.endswith("/files"):
+            name = path.split("/")[3]
+            if name == "default":
+                profile_path = KANBAN_DB.parent
+            else:
+                profile_path = KANBAN_DB.parent / "profiles" / name
+            if not profile_path.exists():
+                self.json_response({"error": "Profile not found"}, 404)
+                return
+            skip = {".git", "__pycache__", "node_modules", ".venv", "venv", "__pycache__"}
+            files = []
+            for f in sorted(profile_path.rglob("*")):
+                if any(part in skip for part in f.parts):
+                    continue
+                if f.is_file():
+                    rel = f.relative_to(profile_path)
+                    files.append({"path": str(rel), "size": f.stat().st_size, "is_dir": False})
+                elif f.is_dir():
+                    rel = f.relative_to(profile_path)
+                    files.append({"path": str(rel) + "/", "size": 0, "is_dir": True})
+            self.json_response(files)
+
+        # GET /api/profiles/{name}/file?path=... — read a file
+        elif path.startswith("/api/profiles/") and "/file" in path and "path=" in parsed.query:
+            name = path.split("/")[3]
+            if name == "default":
+                profile_path = KANBAN_DB.parent
+            else:
+                profile_path = KANBAN_DB.parent / "profiles" / name
+            file_path = params.get("path", [None])[0]
+            if not file_path:
+                self.json_response({"error": "Path required"}, 400)
+                return
+            full_path = profile_path / file_path
+            try:
+                full_path.relative_to(profile_path)
+            except ValueError:
+                self.json_response({"error": "Invalid path"}, 403)
+                return
+            if not full_path.exists():
+                self.json_response({"error": "File not found"}, 404)
+                return
+            if full_path.stat().st_size > 100_000:
+                self.json_response({"error": "File too large (>100KB)"}, 400)
+                return
+            content = full_path.read_text(encoding="utf-8", errors="replace")
+            self.json_response({"content": content, "path": file_path})
 
         else:
             self.send_response(404)
