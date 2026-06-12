@@ -667,6 +667,29 @@ function selectPersonality(name, desc, el) {
   el.style.borderColor = 'var(--accent-cyan)';
   el.style.background = 'rgba(0,212,255,0.05)';
   document.getElementById('personality-preview').textContent = desc || '(blank — no personality set)';
+  // Fetch and display skills for this identity
+  var skillsPreview = document.getElementById('personality-skills');
+  if(!name) {
+    skillsPreview.innerHTML = '<span style="color:var(--text-muted);font-size:0.6rem;">No skills installed for blank profile</span>';
+    return;
+  }
+  skillsPreview.innerHTML = '<span style="color:var(--text-muted);font-size:0.6rem;">Loading skills...</span>';
+  fetch('/api/identities/' + name + '/skills')
+    .then(function(r){return r.json();}).then(function(data){
+      var skills = data.skills || [];
+      if(skills.length === 0) {
+        skillsPreview.innerHTML = '<span style="color:var(--text-muted);font-size:0.6rem;">No additional skills</span>';
+        return;
+      }
+      var html = '<div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.3rem;">';
+      for(var i=0;i<skills.length;i++){
+        html += '<span style="font-size:0.5rem;color:var(--accent-green);background:rgba(0,255,136,0.06);border:1px solid rgba(0,255,136,0.15);padding:0.1rem 0.3rem;border-radius:2px;">⬡ '+esc(skills[i])+'</span>';
+      }
+      html += '</div>';
+      skillsPreview.innerHTML = html;
+    }).catch(function(){
+      skillsPreview.innerHTML = '<span style="color:var(--text-muted);font-size:0.6rem;">Could not load skills</span>';
+    });
 }
 
 function submitCreateProfile() {
@@ -729,6 +752,10 @@ setInterval(loadTasks,10000);
     <div class="form-group">
       <label>Preview</label>
       <div id="personality-preview" style="font-size:0.65rem;color:var(--text-secondary);background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;padding:0.5rem;min-height:40px;white-space:pre-wrap;"></div>
+    </div>
+    <div class="form-group">
+      <label>Skills to Install</label>
+      <div id="personality-skills" style="font-size:0.65rem;color:var(--text-secondary);background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;padding:0.5rem;min-height:30px;"><span style="color:var(--text-muted);font-size:0.6rem;">Select a personality to see skills...</span></div>
     </div>
     <div class="form-actions">
       <button class="btn btn-success" onclick="submitCreateProfile()">Create</button>

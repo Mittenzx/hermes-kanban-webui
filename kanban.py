@@ -184,6 +184,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         identities.append({"name": d.name, "content": content})
             self.json_response(identities)
 
+        # GET /api/identities/{name}/skills — get skills config for an identity
+        elif path.startswith("/api/identities/") and path.endswith("/skills"):
+            name = path.split("/")[3]
+            skills_file = KANBAN_DB.parent / "identities" / name / "skills.json"
+            if skills_file.exists():
+                import json as _json
+                try:
+                    data = _json.loads(skills_file.read_text(encoding="utf-8"))
+                    self.json_response(data)
+                except:
+                    self.json_response({"description": "", "skills": []})
+            else:
+                self.json_response({"description": "", "skills": []})
+
         # GET /api/profiles/{name}/files — list files in profile directory
         elif path.startswith("/api/profiles/") and path.endswith("/files"):
             name = path.split("/")[3]
@@ -295,14 +309,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if result.returncode != 0:
                 self.json_response({"error": result.stderr or result.stdout or "Failed to create profile"}, 500)
                 return
-            # If identity template provided, copy its SOUL.md
+            # If identity template provided, copy its SOUL.md and install skills
             identity = body.get("identity", "")
             if identity:
+                # Copy SOUL.md
                 identity_soul = KANBAN_DB.parent / "identities" / identity / "SOUL.md"
                 profile_soul = profile_path / "SOUL.md"
                 if identity_soul.exists() and profile_soul.exists():
                     import shutil
                     shutil.copy2(str(identity_soul), str(profile_soul))
+                # Install skills from skills.json
+                identity_skills_file = KANBAN_DB.parent / "identities" / identity / "skills.json"
+                if identity_skills_file.exists():
+                    import json as _json
+                    try:
+                        skills_config = _json.loads(identity_skills_file.read_text(encoding="utf-8"))
+                        skills_list = skills_config.get("skills", [])
+                        for skill_id in skills_list:
+                            try:
+                                subprocess.run(
+                                    ["hermes", "-p", name, "skills", "install", skill_id, "--yes"],
+                                    capture_output=True, text=True, timeout=60
+                                )
+                            except: pass
+                    except: pass
             self.json_response({"name": name, "path": str(profile_path)}, 201)
 
         elif path.startswith("/api/boards/") and path.endswith("/tasks"):
