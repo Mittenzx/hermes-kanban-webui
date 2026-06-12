@@ -470,13 +470,49 @@ function renderProfiles() {
   var container = document.getElementById('profiles-list');
   if(!container) return;
   container.innerHTML = '';
+  if(profiles.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.7rem;padding:2rem;text-align:center;">No profiles found</div>';
+    return;
+  }
   for(var i=0;i<profiles.length;i++){
     var p = profiles[i];
-    container.innerHTML += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:3px;padding:0.75rem;display:flex;justify-content:space-between;align-items:center;">'+
-      '<div><div style="font-size:0.8rem;color:var(--text-primary);font-weight:600;">'+esc(p.name)+'</div><div style="font-size:0.6rem;color:var(--text-muted);margin-top:0.15rem;">'+esc(p.path)+'</div></div>'+
-      '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;">View Files</button>'+
+    var dot = p.is_default ? '◆' : '○';
+    var dotColor = p.is_default ? 'var(--accent-green)' : 'var(--text-muted)';
+    var personalityPreview = p.personality ? p.personality.replace(/[#*_\[\]()`~>]/g,'').substring(0,80) : 'No personality set';
+    var skillsText = p.skills_count ? p.skills_count + ' skills' : '0 skills';
+    var modelText = p.model ? p.model.split('/').pop() : '';
+    container.innerHTML +=
+      '<div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid ' + dotColor + ';border-radius:3px;padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;transition:all 0.15s;" onmouseover="this.style.boxShadow=\'var(--glow-cyan)\';this.style.borderColor=\'var(--accent-cyan)\'" onmouseout="this.style.boxShadow=\'none\';this.style.borderColor=\'var(--border)\'">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.2rem;">'+
+            '<span style="color:' + dotColor + ';font-size:0.7rem;">' + dot + '</span>'+
+            '<span style="font-size:0.8rem;color:var(--text-primary);font-weight:600;">' + esc(p.name.toUpperCase()) + '</span>'+
+            (p.is_default ? '<span style="font-size:0.5rem;color:var(--accent-green);background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.2);padding:0.05rem 0.3rem;border-radius:2px;">DEFAULT</span>' : '')+
+          '</div>'+
+          '<div style="font-size:0.55rem;color:var(--text-muted);margin-bottom:0.3rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(p.path) + '</div>'+
+          '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">'+
+            '<span style="font-size:0.55rem;color:var(--accent-cyan);background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.15);padding:0.05rem 0.3rem;border-radius:2px;">◇ ' + esc(personalityPreview) + '</span>'+
+            '<span style="font-size:0.55rem;color:var(--text-muted);background:var(--bg-tertiary);border:1px solid var(--border);padding:0.05rem 0.3rem;border-radius:2px;">⬡ ' + esc(skillsText) + '</span>'+
+            (modelText ? '<span style="font-size:0.55rem;color:var(--text-muted);background:var(--bg-tertiary);border:1px solid var(--border);padding:0.05rem 0.3rem;border-radius:2px;">⬢ ' + esc(modelText) + '</span>' : '')+
+          '</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:0.3rem;flex-shrink:0;">'+
+          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="showFiles(\'' + esc(p.name) + '\')">Files</button>'+
+          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="editSoul(\'' + esc(p.name) + '\')">SOUL.md</button>'+
+          (p.is_default ? '' : '<button class="btn btn-danger" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="deleteProfile(\'' + esc(p.name) + '\')">Delete</button>')+
+        '</div>'+
       '</div>';
   }
+}
+
+function deleteProfile(name) {
+  if(!confirm('Delete profile "' + name + '"? This cannot be undone.')) return;
+  fetch('/api/profiles/' + name, {method: 'DELETE'})
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { alert(data.error); return; }
+      loadProfiles();
+      renderProfiles();
+    });
 }
 
 /* ── Init ── */
@@ -488,7 +524,10 @@ setInterval(loadTasks,10000);
 
 <div class="page" id="page-profiles">
 <div style="padding:1.5rem;max-width:900px;margin:0 auto;">
-  <h2 style="font-size:0.9rem;color:var(--accent-cyan);font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem;text-shadow:var(--glow-cyan);">Profiles</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+    <h2 style="font-size:0.9rem;color:var(--accent-cyan);font-weight:700;text-transform:uppercase;letter-spacing:0.1em;text-shadow:var(--glow-cyan);">Profiles</h2>
+    <button class="btn btn-success" onclick="showCreateProfile()">+ New Profile</button>
+  </div>
   <div id="profiles-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
 </div>
 </div>
