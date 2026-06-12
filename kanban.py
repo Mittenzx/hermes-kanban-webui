@@ -154,6 +154,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         result.append({"name": d.name, "path": str(d), "is_default": False, "personality": p_personality, "skills_count": p_skills, "model": ""})
             self.json_response(result)
 
+        # GET /api/personalities — list built-in personality templates
+        elif path == "/api/personalities":
+            config_path = KANBAN_DB.parent / "config.yaml"
+            personalities = []
+            if config_path.exists():
+                import yaml
+                try:
+                    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                    p = config.get("agent", {}).get("personalities", {})
+                    for name, desc in p.items():
+                        personalities.append({"name": name, "description": desc[:200]})
+                except: pass
+            self.json_response(personalities)
+
         # GET /api/profiles/{name}/files — list files in profile directory
         elif path.startswith("/api/profiles/") and path.endswith("/files"):
             name = path.split("/")[3]
@@ -210,8 +224,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        params = parse_qs(parsed.query)
         length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length) or b"{}")
+        raw_body = self.rfile.read(length)
+        try:
+            body = json.loads(raw_body or b"{}")
+        except Exception:
+            body = raw_body.decode("utf-8", errors="replace") if raw_body else {}
 
         # POST /api/boards — create a new board
         if path == "/api/boards":
@@ -235,6 +254,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
             import shutil
             shutil.copy2(str(KANBAN_DB), str(board_db))
             self.json_response({"slug": slug, "name": slug.replace("-", " ").replace("_", " ").title()}, 201)
+
+        # POST /api/profiles — create a new profile
+        elif path == "/api/profiles":
+            name = body.get("name", "").strip().lower()
+            if not name:
+                self.json_response({"error": "Name required"}, 400)
+                return
+            import re as _re
+            if not _re.match(r'^[a-z0-9][a-z0-9_-]{0,63}$', name):
+                self.json_response({"error": "Invalid name: lowercase alphanumerics, hyphens, underscores"}, 400)
+                return
+            profiles_dir = KANBAN_DB.parent / "profiles"
+            profile_path = profiles_dir / name
+            if profile_path.exists():
+                self.json_response({"error": "Profile already exists"}, 409)
+                return
+            # Create via hermes CLI
+            import subprocess
+            result = subprocess.run(
+                ["hermes", "profile", "create", name],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                self.json_response({"error": result.stderr or result.stdout or "Failed to create profile"}, 500)
+                return
+            # If personality template provided, write SOUL.md
+            personality = body.get("personality", "")
+            if personality:
+                soul_path = profile_path / "SOUL.md"
+                if soul_path.exists():
+                    # Read the personality text from config
+                    config_path = KANBAN_DB.parent / "config.yaml"
+                    if config_path.exists():
+                        import yaml
+                        try:
+                            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                            personalities = config.get("agent", {}).get("personalities", {})
+                            if personality in personalities:
+                                soul_path.write_text(personalities[personality], encoding="utf-8")
+                        except: pass
+            self.json_response({"name": name, "path": str(profile_path)}, 201)
 
         elif path.startswith("/api/boards/") and path.endswith("/tasks"):
             slug = path.split("/")[3]
@@ -291,6 +351,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.execute("INSERT OR IGNORE INTO task_links (parent_id, child_id) VALUES (?, ?)", (parent_id, task_id))
             conn.commit()
             conn.close()
+            self.json_response({"ok": True})
+
+        # POST /api/profiles/{name}/file?path=... — write a file
+        elif path.startswith("/api/profiles/") and "/file" in path and "path=" in parsed.query:
+            name = path.split("/")[3]
+            if name == "default":
+                profile_path = KANBAN_DB.parent
+            else:
+                profile_path = KANBAN_DB.parent / "profiles" / name
+            file_path = params.get("path", [None])[0]
+            if not file_path:
+                self.json_response({"error": "Path required"}, 400)
+                return
+            full_path = profile_path / file_path
+            try:
+                full_path.relative_to(profile_path)
+            except ValueError:
+                self.json_response({"error": "Invalid path"}, 403)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            if isinstance(body, dict):
+                content = body.get("content", "")
+            else:
+                content = str(body)
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content, encoding="utf-8")
             self.json_response({"ok": True})
 
         else:
@@ -355,6 +441,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.commit()
             conn.close()
             self.json_response({"ok": True})
+
+        # DELETE /api/profiles/{name} — delete a profile
+        elif path.startswith("/api/profiles/"):
+            name = path.split("/")[3]
+            if name == "default":
+                self.json_response({"error": "Cannot delete default profile"}, 400)
+                return
+            profiles_dir = KANBAN_DB.parent / "profiles"
+            profile_path = profiles_dir / name
+            if not profile_path.exists():
+                self.json_response({"error": "Profile not found"}, 404)
+                return
+            import subprocess
+            result = subprocess.run(
+                ["hermes", "profile", "delete", name],
+                capture_output=True, text=True, timeout=30,
+                input=name + "\n"
+            )
+            if result.returncode != 0:
+                self.json_response({"error": result.stderr or result.stdout or "Failed to delete profile"}, 500)
+                return
+            self.json_response({"ok": True})
+
         else:
             self.send_response(404)
             self.end_headers()
