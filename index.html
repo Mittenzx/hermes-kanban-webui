@@ -632,7 +632,7 @@ function viewFile(name) {
 var allPersonalities = [];
 
 function loadPersonalities() {
-  fetch('/api/personalities').then(function(r){return r.json();}).then(function(data){
+  fetch('/api/identities').then(function(r){return r.json();}).then(function(data){
     allPersonalities = data;
   });
 }
@@ -640,15 +640,16 @@ function loadPersonalities() {
 function showCreateProfile() {
   document.getElementById('create-profile-overlay').classList.add('active');
   document.getElementById('create-profile-name').value = '';
-  document.getElementById('personality-preview').textContent = 'Select a personality template above...';
+  document.getElementById('personality-preview').textContent = 'Select an identity template above...';
   var list = document.getElementById('personality-list');
   list.innerHTML = '';
   // Blank option
-  list.innerHTML += '<div style="padding:0.4rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\'\',\'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--text-muted);font-size:0.65rem;">○</span> <span style="font-size:0.7rem;color:var(--text-primary);">Blank</span> <span style="font-size:0.6rem;color:var(--text-muted);">— start from scratch</span></div>';
+  list.innerHTML += '<div style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\'\',\'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--text-muted);font-size:0.65rem;">○</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">Blank</span> <span style="font-size:0.6rem;color:var(--text-muted);">— start from scratch</span></div>';
   for(var i=0;i<allPersonalities.length;i++){
     var p = allPersonalities[i];
-    var desc = p.description ? p.description.substring(0,60).replace(/[#*_\[\]()`\n\r]/g,'') + '...' : '';
-    list.innerHTML += '<div style="padding:0.4rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\''+esc(p.name)+'\',\''+esc(p.description.replace(/'/g,"\\'"))+'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--accent-cyan);font-size:0.65rem;">●</span> <span style="font-size:0.7rem;color:var(--text-primary);">'+esc(p.name)+'</span> <span style="font-size:0.6rem;color:var(--text-muted);">— '+esc(desc)+'</span></div>';
+    var preview = p.content ? p.content.replace(/[#*_\[\]()`~\n\r]/g,' ').substring(0,80).trim() + '...' : '';
+    var displayName = p.name.charAt(0).toUpperCase() + p.name.slice(1);
+    list.innerHTML += '<div style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\''+esc(p.name)+'\',\''+esc(p.content.replace(/'/g,"\\'"))+'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--accent-cyan);font-size:0.65rem;">●</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">'+esc(displayName)+'</span> <span style="font-size:0.6rem;color:var(--text-muted);">— '+esc(preview)+'</span></div>';
   }
   document.getElementById('create-profile-name').focus();
 }
@@ -672,21 +673,16 @@ function submitCreateProfile() {
   var name = document.getElementById('create-profile-name').value.trim();
   if(!name) { alert('Profile name required'); return; }
   var selectedEl = document.querySelector('#personality-list > div[style*="border-color: var(--accent-cyan)"]');
-  var personality = '';
+  var identityName = '';
   if(selectedEl) {
     var onclick = selectedEl.getAttribute('onclick');
     if(onclick && onclick.indexOf("selectPersonality(''") !== 0) {
-      // Extract personality name from the preview text
-      var preview = document.getElementById('personality-preview').textContent;
-      if(preview && preview !== '(blank — no personality set)' && preview !== 'Select a personality template above...') {
-        // Find the personality name by matching the description
-        var spans = selectedEl.querySelectorAll('span');
-        if(spans.length >= 2) personality = spans[1].textContent.trim();
-      }
+      var spans = selectedEl.querySelectorAll('span');
+      if(spans.length >= 2) identityName = spans[1].textContent.trim().toLowerCase();
     }
   }
   var body = {name: name};
-  if(personality) body.personality = personality;
+  if(identityName) body.identity = identityName;
   fetch('/api/profiles', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -694,8 +690,10 @@ function submitCreateProfile() {
   }).then(function(r){return r.json();}).then(function(data){
     if(data.error) { alert(data.error); return; }
     hideCreateProfile();
-    loadProfiles().then(function(){ renderProfiles(); });
-  });
+    showToast('Profile "' + name + '" created', 'success');
+    loadProfiles();
+    renderProfiles();
+  }).catch(function(){ alert('Failed to create profile'); });
 }
 
 /* ── Init ── */

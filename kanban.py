@@ -168,6 +168,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 except: pass
             self.json_response(personalities)
 
+        # GET /api/identities — list available identity templates from disk
+        elif path == "/api/identities":
+            identities_dir = KANBAN_DB.parent / "identities"
+            identities = []
+            if identities_dir.exists():
+                for d in sorted(identities_dir.iterdir()):
+                    if d.is_dir():
+                        soul_path = d / "SOUL.md"
+                        content = ""
+                        if soul_path.exists():
+                            try:
+                                content = soul_path.read_text(encoding="utf-8", errors="replace")
+                            except: pass
+                        identities.append({"name": d.name, "content": content})
+            self.json_response(identities)
+
         # GET /api/profiles/{name}/files — list files in profile directory
         elif path.startswith("/api/profiles/") and path.endswith("/files"):
             name = path.split("/")[3]
@@ -279,21 +295,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if result.returncode != 0:
                 self.json_response({"error": result.stderr or result.stdout or "Failed to create profile"}, 500)
                 return
-            # If personality template provided, write SOUL.md
-            personality = body.get("personality", "")
-            if personality:
-                soul_path = profile_path / "SOUL.md"
-                if soul_path.exists():
-                    # Read the personality text from config
-                    config_path = KANBAN_DB.parent / "config.yaml"
-                    if config_path.exists():
-                        import yaml
-                        try:
-                            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-                            personalities = config.get("agent", {}).get("personalities", {})
-                            if personality in personalities:
-                                soul_path.write_text(personalities[personality], encoding="utf-8")
-                        except: pass
+            # If identity template provided, copy its SOUL.md
+            identity = body.get("identity", "")
+            if identity:
+                identity_soul = KANBAN_DB.parent / "identities" / identity / "SOUL.md"
+                profile_soul = profile_path / "SOUL.md"
+                if identity_soul.exists() and profile_soul.exists():
+                    import shutil
+                    shutil.copy2(str(identity_soul), str(profile_soul))
             self.json_response({"name": name, "path": str(profile_path)}, 201)
 
         elif path.startswith("/api/boards/") and path.endswith("/tasks"):
