@@ -228,6 +228,9 @@ var draggedCard = null;
 var currentTaskId = null;
 var currentBoard = 'default';
 var boards = [];
+var selectedIdentity = '';
+var currentFileProfile = '';
+var currentFilePath = '';
 
 function esc(s) { var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 function fmtDate(s) { if(!s) return ''; var d=new Date(s*1000); return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
@@ -453,7 +456,7 @@ function showToast(msg,type) {
 document.addEventListener('keydown',function(e){
   if(e.target.matches('input,textarea,select')) return;
   if(e.key==='n'||e.key==='N'){e.preventDefault();showCreateForm();}
-  if(e.key==='Escape'){closeDrawer();hideCreateForm();document.getElementById('modal-overlay').classList.remove('active');}
+  if(e.key==='Escape'){closeDrawer();hideCreateForm();hideCreateProfile();}
 });
 
 /* ── Navigation ── */
@@ -470,16 +473,31 @@ function switchPage(page) {
 }
 
 /* ── Profiles ── */
+function loadProfiles() {
+  fetch('/api/profiles').then(function(r){return r.json();}).then(function(data){ profiles = data; }).catch(function(){ profiles = []; });
+}
+
 function renderProfiles() {
   var container = document.getElementById('profiles-list');
   if(!container) return;
   container.innerHTML = '';
-  if(profiles.length === 0) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.7rem;padding:2rem;text-align:center;">No profiles found</div>';
+  var searchEl = document.getElementById('profile-search');
+  var query = searchEl ? searchEl.value.toLowerCase().trim() : '';
+  var filtered = profiles;
+  if(query) {
+    filtered = profiles.filter(function(p){
+      return p.name.toLowerCase().indexOf(query) !== -1 ||
+        (p.personality && p.personality.toLowerCase().indexOf(query) !== -1);
+    });
+  }
+  var countEl = document.getElementById('profile-count');
+  if(countEl) countEl.textContent = filtered.length + ' / ' + profiles.length;
+  if(filtered.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.7rem;padding:2rem;text-align:center;">' + (query ? 'No profiles match "' + esc(query) + '"' : 'No profiles found. <button class="btn btn-success" onclick="showCreateProfile()" style="margin-top:0.5rem;">+ Create your first profile</button>') + '</div>';
     return;
   }
-  for(var i=0;i<profiles.length;i++){
-    var p = profiles[i];
+  for(var i=0;i<filtered.length;i++){
+    var p = filtered[i];
     var dot = p.is_default ? '◆' : '○';
     var dotColor = p.is_default ? 'var(--accent-green)' : 'var(--text-muted)';
     var personalityPreview = p.personality ? p.personality.replace(/[#*_\[\]()`~>]/g,'').substring(0,80) : 'No personality set';
@@ -510,18 +528,17 @@ function renderProfiles() {
 }
 
 function deleteProfile(name) {
-  if(!confirm('Delete profile "' + name + '? This cannot be undone.')) return;
+  if(!confirm('Delete profile "' + name + '"?\n\nThis cannot be undone.')) return;
   fetch('/api/profiles/' + name, {method: 'DELETE'})
     .then(function(r){return r.json();}).then(function(data){
-      if(data.error) { alert(data.error); return; }
+      if(data.error) { showToast(data.error, 'error'); return; }
+      showToast('Profile "' + name + '" deleted', 'success');
       loadProfiles();
       renderProfiles();
-    });
+    }).catch(function(){ showToast('Failed to delete profile', 'error'); });
 }
 
 /* ── File Browser ── */
-var currentFileProfile = '';
-var currentFilePath = '';
 
 function showFiles(name) {
   currentFileProfile = name;
@@ -550,15 +567,15 @@ function showFiles(name) {
       for(var i=0;i<files.length;i++){
         var f = files[i];
         var icon = f.is_dir ? '📁' : '📄';
-        var name = f.path.split('/').pop();
         var sizeText = f.is_dir ? '' : formatSize(f.size);
         var actions = '';
         if(!f.is_dir) {
-          if(name === 'SOUL.md') {
-            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\')">Edit</button>';
+          if(f.path === 'SOUL.md') {
+            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\',\''+esc(f.path)+'\')">Edit</button>';
           } else {
-            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="viewFile(\''+esc(name)+'\')">View</button>';
+            actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="viewFile(\''+esc(f.path)+'\')">View</button>';
           }
+          actions += '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\',\''+esc(f.path)+'\')">Edit</button>';
         }
         container.innerHTML += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);font-size:0.65rem;">'+
           '<span style="flex-shrink:0;">'+icon+'</span>'+
@@ -577,18 +594,19 @@ function formatSize(bytes) {
 }
 
 /* ── SOUL.md Editor ── */
-function editSoul(name) {
+function editSoul(name, filePath) {
   currentFileProfile = name;
-  currentFilePath = 'SOUL.md';
+  currentFilePath = filePath || 'SOUL.md';
   var container = document.getElementById('profiles-list');
   container.innerHTML = '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;">Loading...</div>';
-  fetch('/api/profiles/' + name + '/file?path=SOUL.md')
+  fetch('/api/profiles/' + name + '/file?path=' + encodeURIComponent(currentFilePath))
     .then(function(r){return r.json();}).then(function(data){
       if(data.error) { container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Error: ' + esc(data.error) + '</div>'; return; }
+      var fileName = currentFilePath.split('/').pop();
       container.innerHTML =
         '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
           '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="showFiles(\''+esc(name)+'\')">← Back</button>'+
-          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">✏️ Editing SOUL.md</span>'+
+          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">✏️ Editing ' + esc(fileName) + '</span>'+
           '<span style="font-size:0.55rem;color:var(--text-muted);">('+esc(name)+')</span>'+
         '</div>'+
         '<textarea id="soul-editor" style="width:100%;height:calc(100vh - 200px);min-height:300px;background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:0.7rem;font-family:inherit;padding:0.75rem;resize:vertical;outline:none;" onfocus="this.style.borderColor=\'var(--accent-cyan)\';this.style.boxShadow=\'0 0 6px rgba(0,212,255,0.2)\'" onblur="this.style.borderColor=\'var(--border)\';this.style.boxShadow=\'none\'">'+esc(data.content)+'</textarea>'+
@@ -609,23 +627,25 @@ function saveSoul() {
     if(data.error) { alert(data.error); return; }
     showToast('SOUL.md saved', 'success');
     showFiles(currentFileProfile);
-  });
+  }).catch(function(){ showToast('Failed to save file', 'error'); });
 }
 
-function viewFile(name) {
+function viewFile(filePath) {
   var container = document.getElementById('profiles-list');
   container.innerHTML = '<div style="color:var(--text-muted);font-size:0.65rem;padding:1rem;">Loading...</div>';
-  fetch('/api/profiles/' + currentFileProfile + '/file?path=' + encodeURIComponent(name))
+  currentFilePath = filePath;
+  var fileName = filePath.split('/').pop();
+  fetch('/api/profiles/' + currentFileProfile + '/file?path=' + encodeURIComponent(filePath))
     .then(function(r){return r.json();}).then(function(data){
       if(data.error) { container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Error: ' + esc(data.error) + '</div>'; return; }
       container.innerHTML =
         '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">'+
           '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.6rem;" onclick="showFiles(\''+esc(currentFileProfile)+'\')">← Back</button>'+
-          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">📄 '+esc(name)+'</span>'+
+          '<span style="font-size:0.7rem;color:var(--accent-cyan);font-weight:600;">📄 '+esc(fileName)+'</span>'+
           '<span style="font-size:0.55rem;color:var(--text-muted);">('+esc(currentFileProfile)+')</span>'+
         '</div>'+
         '<pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;padding:0.75rem;font-size:0.65rem;color:var(--text-secondary);white-space:pre-wrap;word-wrap:break-word;max-height:calc(100vh - 200px);overflow-y:auto;font-family:inherit;">'+(data.content ? esc(data.content) : '(empty file)')+'</pre>';
-    });
+    }).catch(function(){ container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Failed to load file</div>'; });
 }
 
 /* ── Create Profile ── */
@@ -641,15 +661,17 @@ function showCreateProfile() {
   document.getElementById('create-profile-overlay').classList.add('active');
   document.getElementById('create-profile-name').value = '';
   document.getElementById('personality-preview').textContent = 'Select an identity template above...';
+  document.getElementById('personality-skills').innerHTML = '<span style="color:var(--text-muted);font-size:0.6rem;">Select a personality to see skills...</span>';
+  selectedIdentity = '';
   var list = document.getElementById('personality-list');
   list.innerHTML = '';
   // Blank option
-  list.innerHTML += '<div style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\'\',\'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--text-muted);font-size:0.65rem;">○</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">Blank</span> <span style="font-size:0.6rem;color:var(--text-muted);">— start from scratch</span></div>';
+  list.innerHTML += '<div class="personality-option" style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" data-identity="" onclick="selectPersonality(\'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--text-muted);font-size:0.65rem;">○</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">Blank</span> <span style="font-size:0.6rem;color:var(--text-muted);">— start from scratch</span></div>';
   for(var i=0;i<allPersonalities.length;i++){
     var p = allPersonalities[i];
     var preview = p.content ? p.content.replace(/[#*_\[\]()`~\n\r]/g,' ').substring(0,80).trim() + '...' : '';
     var displayName = p.name.charAt(0).toUpperCase() + p.name.slice(1);
-    list.innerHTML += '<div style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" onclick="selectPersonality(\''+esc(p.name)+'\',\''+esc(p.content.replace(/'/g,"\\'"))+'\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--accent-cyan);font-size:0.65rem;">●</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">'+esc(displayName)+'</span> <span style="font-size:0.6rem;color:var(--text-muted);">— '+esc(preview)+'</span></div>';
+    list.innerHTML += '<div class="personality-option" style="padding:0.4rem 0.6rem;border-radius:3px;cursor:pointer;margin-bottom:0.2rem;border:1px solid transparent;" data-identity="' + esc(p.name) + '" onclick="selectPersonality(\'' + esc(p.name) + '\',this)" onmouseover="this.style.background=\'var(--bg-tertiary)\'" onmouseout="this.style.background=\'transparent\'"><span style="color:var(--accent-cyan);font-size:0.65rem;">●</span> <span style="font-size:0.7rem;color:var(--text-primary);font-weight:600;">' + esc(displayName) + '</span> <span style="font-size:0.6rem;color:var(--text-muted);">— ' + esc(preview) + '</span></div>';
   }
   document.getElementById('create-profile-name').focus();
 }
@@ -658,7 +680,7 @@ function hideCreateProfile() {
   document.getElementById('create-profile-overlay').classList.remove('active');
 }
 
-function selectPersonality(name, desc, el) {
+function selectPersonality(name, el) {
   var items = document.querySelectorAll('#personality-list > div');
   for(var i=0;i<items.length;i++){
     items[i].style.borderColor = 'transparent';
@@ -666,7 +688,13 @@ function selectPersonality(name, desc, el) {
   }
   el.style.borderColor = 'var(--accent-cyan)';
   el.style.background = 'rgba(0,212,255,0.05)';
-  document.getElementById('personality-preview').textContent = desc || '(blank — no personality set)';
+  selectedIdentity = name;
+  // Find the personality data to show preview
+  var personality = null;
+  for(var i=0;i<allPersonalities.length;i++){
+    if(allPersonalities[i].name === name) { personality = allPersonalities[i]; break; }
+  }
+  document.getElementById('personality-preview').textContent = personality ? personality.content : '(blank — no personality set)';
   // Fetch and display skills for this identity
   var skillsPreview = document.getElementById('personality-skills');
   if(!name) {
@@ -693,30 +721,35 @@ function selectPersonality(name, desc, el) {
 }
 
 function submitCreateProfile() {
-  var name = document.getElementById('create-profile-name').value.trim();
-  if(!name) { alert('Profile name required'); return; }
-  var selectedEl = document.querySelector('#personality-list > div[style*="border-color: var(--accent-cyan)"]');
-  var identityName = '';
-  if(selectedEl) {
-    var onclick = selectedEl.getAttribute('onclick');
-    if(onclick && onclick.indexOf("selectPersonality(''") !== 0) {
-      var spans = selectedEl.querySelectorAll('span');
-      if(spans.length >= 2) identityName = spans[1].textContent.trim().toLowerCase();
-    }
+  var nameInput = document.getElementById('create-profile-name');
+  var name = nameInput.value.trim().toLowerCase();
+  if(!name) {
+    nameInput.style.borderColor = 'var(--accent-pink)';
+    nameInput.focus();
+    showToast('Profile name is required', 'error');
+    return;
   }
+  // Validate name format
+  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) {
+    nameInput.style.borderColor = 'var(--accent-pink)';
+    nameInput.focus();
+    showToast('Invalid name: lowercase alphanumerics, hyphens, underscores', 'error');
+    return;
+  }
+  nameInput.style.borderColor = 'var(--border)';
   var body = {name: name};
-  if(identityName) body.identity = identityName;
+  if(selectedIdentity) body.identity = selectedIdentity;
   fetch('/api/profiles', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(r){return r.json();}).then(function(data){
-    if(data.error) { alert(data.error); return; }
+    if(data.error) { showToast(data.error, 'error'); return; }
     hideCreateProfile();
     showToast('Profile "' + name + '" created', 'success');
     loadProfiles();
     renderProfiles();
-  }).catch(function(){ alert('Failed to create profile'); });
+  }).catch(function(){ showToast('Failed to create profile', 'error'); });
 }
 
 /* ── Init ── */
@@ -732,6 +765,10 @@ setInterval(loadTasks,10000);
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
     <h2 style="font-size:0.9rem;color:var(--accent-cyan);font-weight:700;text-transform:uppercase;letter-spacing:0.1em;text-shadow:var(--glow-cyan);">Profiles</h2>
     <button class="btn btn-success" onclick="showCreateProfile()">+ New Profile</button>
+  </div>
+  <div style="display:flex;gap:0.5rem;margin-bottom:1rem;align-items:center;">
+    <input type="text" id="profile-search" placeholder="Filter profiles..." style="flex:1;padding:0.35rem 0.6rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:2px;color:var(--text-primary);font-size:0.7rem;font-family:inherit;outline:none;" oninput="renderProfiles()" onfocus="this.style.borderColor='var(--accent-cyan)'" onblur="this.style.borderColor='var(--border)'" />
+    <span id="profile-count" style="font-size:0.6rem;color:var(--text-muted);flex-shrink:0;"></span>
   </div>
   <div id="profiles-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
 </div>
