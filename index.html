@@ -157,6 +157,7 @@
 <div class="header">
   <div style="display:flex;gap:0.6rem;align-items:center;">
     <h1>Kanban</h1>
+    <input type="text" id="task-search" placeholder="Search tasks..." style="background:var(--bg-primary);border:1px solid var(--border);border-radius:2px;color:var(--text-secondary);padding:0.25rem 0.5rem;font-size:0.65rem;font-family:inherit;width:160px;" oninput="loadTasks()" onfocus="this.style.borderColor='var(--accent-cyan)'" onblur="this.style.borderColor='var(--border)'"/>
     <select id="board-switcher" onchange="switchBoard(this.value)" style="background:var(--bg-primary);border:1px solid var(--border);border-radius:2px;color:var(--text-secondary);padding:0.25rem 0.4rem;font-size:0.65rem;font-family:inherit;"></select>
     <button class="btn" onclick="showCreateBoard()" style="padding:0.25rem 0.5rem;font-size:0.6rem;">+ Board</button>
   </div>
@@ -210,6 +211,22 @@
 
 </div><!-- end page-kanban -->
 
+<!-- Create Board Modal -->
+<div class="modal-overlay" id="create-board-overlay">
+  <div class="modal">
+    <h3>Create New Board</h3>
+    <div class="form-group">
+      <label>Board Slug</label>
+      <input type="text" id="create-board-name" placeholder="e.g. project-x, sprint-1" style="font-family:inherit;" />
+      <div style="font-size:0.55rem;color:var(--text-muted);margin-top:0.2rem;">Lowercase alphanumerics, hyphens, underscores. Max 64 chars.</div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-success" onclick="submitCreateBoard()">Create</button>
+      <button class="btn btn-secondary" onclick="hideCreateBoard()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast" class="toast" style="display:none;"></div>
 
@@ -236,15 +253,21 @@ function esc(s) { var d=document.createElement('div'); d.textContent=s||''; retu
 function fmtDate(s) { if(!s) return ''; var d=new Date(s*1000); return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
 
 function loadTasks() {
-  fetch('/api/boards/'+currentBoard+'/tasks').then(function(r){return r.json();}).then(function(data){
+  var searchEl = document.getElementById('task-search');
+  var query = searchEl ? searchEl.value.trim() : '';
+  var url = '/api/boards/'+currentBoard+'/tasks';
+  if(query) url += '?search=' + encodeURIComponent(query);
+  fetch(url).then(function(r){return r.json();}).then(function(data){
     tasks = data;
-    document.getElementById('task-count').textContent = tasks.length + ' tasks';
+    document.getElementById('task-count').textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
     renderBoard();
+  }).catch(function(){
+    document.getElementById('task-count').textContent = 'Error loading';
   });
 }
 
 function loadProfiles() {
-  fetch('/api/profiles').then(function(r){return r.json();}).then(function(data){ profiles = data; });
+  fetch('/api/profiles').then(function(r){return r.json();}).then(function(data){ profiles = data; }).catch(function(){ profiles = []; });
 }
 
 function loadBoards() {
@@ -255,21 +278,32 @@ function loadBoards() {
     for(var i=0;i<boards.length;i++){
       sel.innerHTML += '<option value="'+esc(boards[i].slug)+'" '+(boards[i].slug===currentBoard?'selected':'')+'>'+esc(boards[i].name)+'</option>';
     }
-  });
+  }).catch(function(){});
 }
 
-function switchBoard(slug) { currentBoard = slug; loadTasks(); }
+function switchBoard(slug) { currentBoard = slug; document.getElementById('task-search').value = ''; loadTasks(); }
 
 function showCreateBoard() {
-  var slug = prompt('Board slug (lowercase, hyphens ok):');
-  if(!slug) return;
-  slug = slug.trim().toLowerCase();
+  document.getElementById('create-board-overlay').classList.add('active');
+  document.getElementById('create-board-name').value = '';
+  document.getElementById('create-board-name').focus();
+}
+
+function hideCreateBoard() {
+  document.getElementById('create-board-overlay').classList.remove('active');
+}
+
+function submitCreateBoard() {
+  var nameInput = document.getElementById('create-board-name');
+  var slug = nameInput.value.trim().toLowerCase();
+  if(!slug) { nameInput.style.borderColor='var(--accent-pink)'; nameInput.focus(); showToast('Board name required','error'); return; }
+  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) { nameInput.style.borderColor='var(--accent-pink)'; nameInput.focus(); showToast('Invalid slug','error'); return; }
+  nameInput.style.borderColor='var(--border)';
   fetch('/api/boards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug})})
     .then(function(r){return r.json();}).then(function(data){
-      if(data.error) { alert(data.error); return; }
-      loadBoards();
-      switchBoard(slug);
-    });
+      if(data.error) { showToast(data.error,'error'); return; }
+      hideCreateBoard(); showToast('Board "'+slug+'" created','success'); loadBoards(); switchBoard(slug);
+    }).catch(function(){ showToast('Failed to create board','error'); });
 }
 
 function renderBoard() {
@@ -282,15 +316,29 @@ function renderBoard() {
     html += '<div class="column-header"><span>'+status.label+'</span><span class="count">'+statusTasks.length+'</span></div>';
     html += '<div class="column-body" data-status="'+status.key+'">';
     for(var j=0;j<statusTasks.length;j++){ html += renderCard(statusTasks[j]); }
+    html += '<div style="padding:0.2rem;"><span style="font-size:0.55rem;color:var(--text-muted);cursor:pointer;display:block;text-align:center;border:1px dashed var(--border);border-radius:2px;padding:0.25rem;" onmouseover="this.style.borderColor=\'var(--accent-cyan)\';this.style.color=\'var(--accent-cyan)\'" onmouseout="this.style.borderColor=\'var(\'\'border)\';this.style.color=\'var(--text-muted)\'" onclick="showCreateForm(\''+status.key+'\')">+ Add task</span></div>';
     html += '</div></div>';
   }
   board.innerHTML = html;
 }
 
 function renderCard(task) {
+  var priColors = ['#555','#00d4ff','#ffbe0b','#ff006e'];
+  var priColor = priColors[task.priority] || '#555';
+  var commentCount = task.comments ? task.comments.length : 0;
+  var commentBadge = commentCount > 0 ? '<span style="margin-left:0.3rem;font-size:0.5rem;color:var(--text-muted);">💬'+commentCount+'</span>' : '';
+  var bodyPreview = task.body ? esc(task.body.substring(0,60)) : '';
+  if(task.body && task.body.length > 60) bodyPreview += '...';
   return '<div class="task-card" draggable="true" data-id="'+esc(task.id)+'" onclick="openTask(\''+esc(task.id)+'\')">'+
     '<div class="title">'+esc(task.title)+'</div>'+
-    '<div class="meta"><span class="assignee">'+esc(task.assignee||'unassigned')+'</span><span>'+fmtDate(task.created_at)+'</span></div>'+
+    (bodyPreview ? '<div style="font-size:0.55rem;color:var(--text-muted);margin-bottom:0.2rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+bodyPreview+'</div>' : '')+
+    '<div class="meta">'+
+      '<span class="assignee">'+esc(task.assignee||'unassigned')+'</span>'+
+      '<span style="display:flex;align-items:center;gap:0.2rem;">'+
+        '<span style="color:'+priColor+';font-size:0.45rem;">●</span>'+
+        '<span>'+fmtDate(task.created_at)+'</span>'+commentBadge+
+      '</span>'+
+    '</div>'+
     '</div>';
 }
 
@@ -317,14 +365,38 @@ document.addEventListener('drop', function(e) {
   var newStatus=cb.dataset.status;
   var taskId=draggedCard.dataset.id;
   fetch('/api/tasks/'+taskId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})})
-    .then(function(){ var t=tasks.find(function(x){return x.id===taskId;}); if(t) t.status=newStatus; renderBoard(); });
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { showToast(data.error,'error'); return; }
+      var t=tasks.find(function(x){return x.id===taskId;}); if(t) t.status=newStatus; renderBoard();
+    }).catch(function(){ showToast('Failed to move task','error'); });
 });
 
 /* ── Drawer ── */
+var refreshInterval = null;
+
+function startAutoRefresh() {
+  if(refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(loadTasks, 10000);
+}
+
+function pauseAutoRefresh() {
+  if(refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+}
+
+function resumeAutoRefresh() {
+  startAutoRefresh();
+}
+
 function openTask(id) {
   currentTaskId = id;
-  var task = tasks.find(function(t){return t.id===id;});
-  if(!task) return;
+  fetch('/api/tasks/'+id)
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { showToast(data.error,'error'); return; }
+      renderDrawer(data);
+    }).catch(function(){ showToast('Failed to load task','error'); });
+}
+
+function renderDrawer(task) {
   document.getElementById('drawer-title').textContent = task.title;
   var commentsHtml = '';
   if(task.comments && task.comments.length > 0) {
@@ -335,6 +407,25 @@ function openTask(id) {
   } else {
     commentsHtml = '<div style="color:var(--text-muted);font-size:0.65rem;">No comments yet</div>';
   }
+  // Task links
+  var linksHtml = '';
+  if(task.parent_ids && task.parent_ids.length > 0) {
+    linksHtml += '<div style="font-size:0.6rem;color:var(--text-muted);margin-bottom:0.3rem;">Parents: ';
+    for(var i=0;i<task.parent_ids.length;i++){
+      var lt = tasks.find(function(t){return t.id===task.parent_ids[i];});
+      linksHtml += '<span style="background:var(--bg-tertiary);padding:0.1rem 0.3rem;border-radius:2px;margin-right:0.2rem;">'+(lt?esc(lt.title):esc(task.parent_ids[i]))+'</span>';
+    }
+    linksHtml += '</div>';
+  }
+  if(task.child_ids && task.child_ids.length > 0) {
+    linksHtml += '<div style="font-size:0.6rem;color:var(--text-muted);margin-bottom:0.3rem;">Children: ';
+    for(var i=0;i<task.child_ids.length;i++){
+      var lt = tasks.find(function(t){return t.id===task.child_ids[i];});
+      linksHtml += '<span style="background:var(--bg-tertiary);padding:0.1rem 0.3rem;border-radius:2px;margin-right:0.2rem;">'+(lt?esc(lt.title):esc(task.child_ids[i]))+'</span>';
+    }
+    linksHtml += '</div>';
+  }
+  if(linksHtml) linksHtml = '<div class="drawer-field"><label>Linked Tasks</label>'+linksHtml+'</div>';
   var assigneeOptions = '';
   for(var i=0;i<profiles.length;i++){
     assigneeOptions += '<option value="'+esc(profiles[i].name)+'" '+(task.assignee===profiles[i].name?'selected':'')+'>'+esc(profiles[i].name)+'</option>';
@@ -346,50 +437,62 @@ function openTask(id) {
   document.getElementById('drawer-body').innerHTML =
     '<div class="drawer-field"><label>Title</label><input type="text" id="field-title" value="'+esc(task.title)+'"/></div>'+
     '<div class="drawer-field"><label>Description</label><textarea id="field-body">'+esc(task.body||'')+'</textarea></div>'+
-    '<div class="drawer-field"><label>Assignee</label><select id="field-assignee">'+assigneeOptions+'</select></div>'+
+    '<div class="drawer-field"><label>Assignee</label><select id="field-assignee">'+assigneeOptions+'</select>'+
+    ' <input type="text" id="custom-assignee" placeholder="Or type custom assignee..." style="margin-top:0.3rem;width:100%;padding:0.35rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:2px;color:var(--text-primary);font-size:0.65rem;font-family:inherit;"/></div>'+
     '<div class="drawer-field"><label>Status</label><select id="field-status">'+statusOptions+'</select></div>'+
+    linksHtml+
     '<div class="drawer-field"><label>Comments</label>'+commentsHtml+
     '<div style="display:flex;gap:0.4rem;margin-top:0.4rem;">'+
     '<input type="text" id="new-comment" placeholder="Add a comment..." style="flex:1;padding:0.35rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:2px;color:var(--text-primary);font-size:0.7rem;font-family:inherit;"/>'+
     '<button class="btn btn-primary" onclick="addComment()" style="padding:0.35rem 0.6rem;">Post</button></div></div>';
   document.getElementById('drawer').classList.add('active');
   document.getElementById('drawer-overlay').classList.add('active');
+  pauseAutoRefresh();
 }
 
 function closeDrawer() {
   document.getElementById('drawer').classList.remove('active');
   document.getElementById('drawer-overlay').classList.remove('active');
   currentTaskId = null;
+  resumeAutoRefresh();
 }
 
 function saveTask() {
   if(!currentTaskId) return;
+  var customEl = document.getElementById('custom-assignee');
+  var assignee = (customEl && customEl.value.trim()) ? customEl.value.trim() : document.getElementById('field-assignee').value;
   fetch('/api/tasks/'+currentTaskId,{
     method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       title:document.getElementById('field-title').value,
       body:document.getElementById('field-body').value,
-      assignee:document.getElementById('field-assignee').value,
+      assignee:assignee,
       status:document.getElementById('field-status').value,
     })
-  }).then(function(r){return r.json();}).then(function(){
-    showToast('Task saved','success');
-    closeDrawer();
-    loadTasks();
-  });
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data.error) { showToast(data.error,'error'); return; }
+    showToast('Task saved','success'); closeDrawer(); loadTasks();
+  }).catch(function(){ showToast('Failed to save','error'); });
 }
 
 function completeTask() {
   if(!currentTaskId) return;
+  if(!confirm('Mark this task as done?')) return;
   fetch('/api/tasks/'+currentTaskId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'done'})})
-    .then(function(){ showToast('Task completed','success'); closeDrawer(); loadTasks(); });
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { showToast(data.error,'error'); return; }
+      showToast('Task completed','success'); closeDrawer(); loadTasks();
+    }).catch(function(){ showToast('Failed','error'); });
 }
 
 function deleteTask() {
   if(!currentTaskId) return;
-  if(!confirm('Delete this task?')) return;
+  if(!confirm('Delete this task?\n\nThis cannot be undone.')) return;
   fetch('/api/tasks/'+currentTaskId,{method:'DELETE'})
-    .then(function(){ showToast('Task deleted','success'); closeDrawer(); loadTasks(); });
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { showToast(data.error,'error'); return; }
+      showToast('Task deleted','success'); closeDrawer(); loadTasks();
+    }).catch(function(){ showToast('Failed to delete','error'); });
 }
 
 function addComment() {
@@ -398,11 +501,14 @@ function addComment() {
   var body = input.value.trim();
   if(!body) return;
   fetch('/api/tasks/'+currentTaskId+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:body,author:'human'})})
-    .then(function(){ input.value=''; openTask(currentTaskId); });
+    .then(function(r){return r.json();}).then(function(data){
+      if(data.error) { showToast(data.error,'error'); return; }
+      input.value=''; openTask(currentTaskId);
+    }).catch(function(){ showToast('Failed to add comment','error'); });
 }
 
 /* ── Modal ── */
-function showCreateForm() {
+function showCreateForm(defaultStatus) {
   document.getElementById('modal-overlay').classList.add('active');
   var sel = document.getElementById('new-assignee');
   sel.innerHTML = '';
@@ -412,7 +518,7 @@ function showCreateForm() {
   var ssel = document.getElementById('new-status');
   ssel.innerHTML = '';
   for(var i=0;i<STATUSES.length;i++){
-    ssel.innerHTML += '<option value="'+STATUSES[i].key+'" '+(STATUSES[i].key==='todo'?'selected':'')+'>'+STATUSES[i].label+'</option>';
+    ssel.innerHTML += '<option value="'+STATUSES[i].key+'" '+(STATUSES[i].key===(defaultStatus||'todo')?'selected':'')+'>'+STATUSES[i].label+'</option>';
   }
   document.getElementById('new-title').focus();
 }
@@ -425,7 +531,7 @@ function hideCreateForm() {
 
 function submitTask() {
   var title = document.getElementById('new-title').value.trim();
-  if(!title) return;
+  if(!title) { showToast('Title is required','error'); return; }
   fetch('/api/boards/'+currentBoard+'/tasks',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -434,12 +540,18 @@ function submitTask() {
       assignee:document.getElementById('new-assignee').value,
       status:document.getElementById('new-status').value,
     })
-  }).then(function(){ showToast('Task created','success'); hideCreateForm(); loadTasks(); });
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data.error) { showToast(data.error,'error'); return; }
+    showToast('Task created','success'); hideCreateForm(); loadTasks();
+  }).catch(function(){ showToast('Failed to create task','error'); });
 }
 
 // Close modals on overlay click
 document.getElementById('modal-overlay').addEventListener('click',function(e){
   if(e.target===e.currentTarget) hideCreateForm();
+});
+document.getElementById('create-board-overlay').addEventListener('click', function(e) {
+  if(e.target === e.currentTarget) hideCreateBoard();
 });
 document.getElementById('create-profile-overlay').addEventListener('click', function(e) {
   if(e.target === e.currentTarget) hideCreateProfile();
@@ -757,7 +869,7 @@ loadProfiles();
 loadPersonalities();
 loadBoards();
 loadTasks();
-setInterval(loadTasks,10000);
+startAutoRefresh();
 </script>
 
 <div class="page" id="page-profiles">
