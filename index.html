@@ -612,7 +612,7 @@ function renderProfiles() {
     var p = filtered[i];
     var dot = p.is_default ? '◆' : '○';
     var dotColor = p.is_default ? 'var(--accent-green)' : 'var(--text-muted)';
-    var personalityPreview = p.personality ? p.personality.replace(/[#*_\[\]()`~>]/g,'').substring(0,80) : 'No personality set';
+    var personalityPreview = p.personality ? p.personality.replace(/[#*_\[\]()`~>|`\-]/g,'').replace(/\s+/g,' ').trim().substring(0,80) : 'No personality set';
     var skillsText = p.skills_count ? p.skills_count + ' skills' : '0 skills';
     var modelText = p.model ? p.model.split('/').pop() : '';
     container.innerHTML +=
@@ -632,7 +632,7 @@ function renderProfiles() {
         '</div>'+
         '<div style="display:flex;gap:0.3rem;flex-shrink:0;">'+
           '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="showFiles(\'' + esc(p.name) + '\')">Files</button>'+
-          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="editSoul(\'' + esc(p.name) + '\')">SOUL.md</button>'+
+          '<button class="btn" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="editSoul(\'' + esc(p.name) + '\', \'SOUL.md\')">SOUL.md</button>'+
           (p.is_default ? '' : '<button class="btn btn-danger" style="padding:0.25rem 0.5rem;font-size:0.55rem;" onclick="deleteProfile(\'' + esc(p.name) + '\')">Delete</button>')+
         '</div>'+
       '</div>';
@@ -678,7 +678,7 @@ function showFiles(name) {
       }
       for(var i=0;i<files.length;i++){
         var f = files[i];
-        var icon = f.is_dir ? '📁' : '📄';
+        var icon = f.is_dir ? '📁' : getFileIcon(f.path);
         var sizeText = f.is_dir ? '' : formatSize(f.size);
         var actions = '';
         if(!f.is_dir) {
@@ -686,8 +686,8 @@ function showFiles(name) {
             actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\',\''+esc(f.path)+'\')">Edit</button>';
           } else {
             actions = '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="viewFile(\''+esc(f.path)+'\')">View</button>';
+            actions += '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\',\''+esc(f.path)+'\')">Edit</button>';
           }
-          actions += '<button class="btn" style="padding:0.15rem 0.4rem;font-size:0.5rem;" onclick="editSoul(\''+esc(name)+'\',\''+esc(f.path)+'\')">Edit</button>';
         }
         container.innerHTML += '<div style="display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.5rem;border-bottom:1px solid var(--border);font-size:0.65rem;">'+
           '<span style="flex-shrink:0;">'+icon+'</span>'+
@@ -696,10 +696,19 @@ function showFiles(name) {
           '<div style="flex-shrink:0;display:flex;gap:0.2rem;">'+actions+'</div>'+
           '</div>';
       }
+    }).catch(function(){
+      container.innerHTML = '<div style="color:var(--accent-pink);font-size:0.65rem;padding:1rem;">Failed to load files</div>';
     });
 }
 
+function getFileIcon(path) {
+  var ext = path.split('.').pop().toLowerCase();
+  var icons = { 'md':'📝', 'txt':'📄', 'json':'📋', 'yaml':'⚙️', 'yml':'⚙️', 'py':'🐍', 'js':'📜', 'html':'🌐', 'css':'🎨', 'sh':'⚡', 'bat':'⚡', 'png':'🖼️', 'jpg':'🖼️', 'gif':'🖼️', 'svg':'🖼️', 'pdf':'📕', 'zip':'📦', 'gz':'📦' };
+  return icons[ext] || '📄';
+}
+
 function formatSize(bytes) {
+  if(bytes === 0) return '0 B';
   if(bytes < 1024) return bytes + ' B';
   if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
   return (bytes/(1024*1024)).toFixed(1) + ' MB';
@@ -736,8 +745,8 @@ function saveSoul() {
     headers: {'Content-Type': 'text/plain'},
     body: content
   }).then(function(r){return r.json();}).then(function(data){
-    if(data.error) { alert(data.error); return; }
-    showToast('SOUL.md saved', 'success');
+    if(data.error) { showToast(data.error, 'error'); return; }
+    showToast('File saved', 'success');
     showFiles(currentFileProfile);
   }).catch(function(){ showToast('Failed to save file', 'error'); });
 }
@@ -766,7 +775,7 @@ var allPersonalities = [];
 function loadPersonalities() {
   fetch('/api/identities').then(function(r){return r.json();}).then(function(data){
     allPersonalities = data;
-  });
+  }).catch(function(){});
 }
 
 function showCreateProfile() {
